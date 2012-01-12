@@ -10,16 +10,19 @@ OFMT=elf64-x86-64
 BARCH=i386:x86-64 
 endif
 
+#CFLAGS=-O0 -g -fno-inline -Wall
+CFLAGS=-O2 -Wall
+
 OBJCOPY=objcopy -I binary -O $(OFMT) -B $(BARCH) --rename-section .data=.rodata,alloc,load,readonly,data,contents
 
 feedbackd: feedbackd.o libcaptcha.o pages.a
-	$(CXX) -o$@ $^ -levent
+	$(CXX) -o$@ $^ -levent $(shell pkg-config --libs libssl)
 
 %.o: %.cpp
-	$(CXX) -c -o$@ -O2 -Wall $<
+	$(CXX) -c -o$@ $(CFLAGS) $<
 
 %.o: %.c
-	$(CC) -c -o$@ -O2 -Wall $<
+	$(CC) -c -o$@ $(CFLAGS) $<
 
 %.o: html/%.html
 	cp $< tmp.html
@@ -34,7 +37,7 @@ clean:
 	rm -f feedbackd *.o *.a
 
 tar:
-	tar czf feedbackd.tar.gz feedbackd.cpp libcaptcha.[ch] default_*.html Makefile
+	tar czf feedbackd.tar.gz feedbackd.cpp libcaptcha.[ch] html/default_*.html Makefile
 
 feedbackd.o: feedbackd.cpp libcaptcha.h
 libcaptcha.o: libcaptcha.c libcaptcha.h

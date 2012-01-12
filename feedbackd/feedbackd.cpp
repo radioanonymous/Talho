@@ -12,7 +12,13 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
 #include <sys/un.h>
+#include <openssl/md5.h>
+
+#define FEEDBACK_PREFIX		"/feedback"
+#define	UID_SALT			"anon.fm"
+#define	DIGEST_SALT			"type_random_letters_here"
 
 struct cdata {
 	char			content[6];
@@ -153,8 +159,10 @@ static char xval(char c)
 }
 
 #if !defined(_EVENT_NUMERIC_VERSION) || _EVENT_NUMERIC_VERSION < 0x02000000
-#	define	evhttp_request_get_command(req) (req)->type
-#	define	evhttp_request_get_input_buffer(req) (req)->input_buffer
+#	define	evhttp_request_get_command(req)			(req)->type
+#	define	evhttp_request_get_input_buffer(req)	(req)->input_buffer
+#	define	evhttp_request_get_input_headers(req)	(req)->input_headers
+#	define	evhttp_request_get_connection(req)		(req)->evcon
 #endif
 
 static void say(const std::string &what)
@@ -182,12 +190,56 @@ static void say(const std::string &what)
 	close(sock);
 }
 
+std::string generate_uid(struct evhttp_request *req)
+{
+	std::string result;
+	static const char syl[] = "besakoparedumanewasitozamikagano"; // from ans.py
+	static const char xdigit[] = "0123456789abcdef";
+	unsigned char digest[16];
+	MD5_CTX m5c;
+	MD5_Init(&m5c);
+	/* 1. Translate IPv4 into symbolic name */
+	/* Look for X-Forwarded-For header */
+	const char *fwd_ip = evhttp_find_header(evhttp_request_get_input_headers(req), "X-Real-IP");
+	if (!fwd_ip)
+		fwd_ip = evhttp_find_header(evhttp_request_get_input_headers(req), "X-Forwarded-For");
+	if (fwd_ip) {
+		MD5_Update(&m5c, fwd_ip, strlen(fwd_ip));
+	} else {
+		char *peer = NULL;
+		ev_uint16_t port = 0;
+		evhttp_connection_get_peer(evhttp_request_get_connection(req), &peer, &port);
+		if (peer) {
+			MD5_Update(&m5c, peer, strlen(peer));
+		} else {
+			MD5_Update(&m5c, "0.0.0.0", sizeof("0.0.0.0") - 1);
+		}
+	}
+	MD5_Update(&m5c, UID_SALT, sizeof(UID_SALT) - 1);
+	MD5_Final(digest, &m5c);
+	for (unsigned i = 0; i < 4; i++) {
+		result += syl[digest[i] >> 4];
+		result += syl[digest[i] & 0xf];
+	}
+	/* 2. Add 4-symbols digest */
+	MD5_Init(&m5c);
+	MD5_Update(&m5c, result.c_str(), result.size());
+	MD5_Update(&m5c, DIGEST_SALT, sizeof(DIGEST_SALT) - 1);
+	MD5_Final(digest, &m5c);
+	for (unsigned i = 0; i < 2; i++) {
+		result += xdigit[digest[i] >> 4];
+		result += xdigit[digest[i] & 0xf];
+	}
+	return result;
+}
+
 static void process_request(struct evhttp_request *req, void *arg)
 {
-	static const std::string location = (char*)arg;
+	static const std::string location = FEEDBACK_PREFIX;
 	struct evbuffer *buf = evbuffer_new();
 	if (!buf)
 		return;
+	generate_uid(req);
 	const char *uri = evhttp_request_uri(req);
 	if (memcmp(uri, location.c_str(), location.size()) == 0) {
 		uri += location.size();
@@ -237,7 +289,8 @@ static void process_request(struct evhttp_request *req, void *arg)
 					/* message text */
 					what = form_msg + "=";
 					char *msg = strstr(&post[0], what.c_str());
-					std::string raw_message = "From 123456789012  ";
+					std::string uid = generate_uid(req);
+					std::string raw_message = "From " + uid + "  ";
 					if (msg) {
 						std::string message;
 						for (msg = msg + what.size(); *msg && *msg != '&'; msg++) {
@@ -274,6 +327,7 @@ static void process_request(struct evhttp_request *req, void *arg)
 #undef FINZ
 					if (text && cid && (1 || cc.validate(strtoul(cid, NULL, 10), text))) {
 						tmpl = html_tmpl_ok;
+						p["UID"] = uid;
 						say(raw_message);
 					}
 				}
@@ -283,12 +337,14 @@ static void process_request(struct evhttp_request *req, void *arg)
 			}
 		}
 		evhttp_send_reply(req, HTTP_OK, "OK", buf);
+		evbuffer_free(buf);
 		return;
 	}
 notfound:
 	evhttp_add_header(req->output_headers, "Content-Type", "text/plain");
 	evbuffer_add_printf(buf, "Not found");
 	evhttp_send_reply(req, HTTP_NOTFOUND, "Not found", buf);
+	evbuffer_free(buf);
 }
 
 static char *read_file(const char *fname, const char *default_contents)
@@ -333,7 +389,7 @@ int main(int argc, char **argv)
 	html_tmpl = read_file("feedback_ask.html", html_default_ask);
 	html_tmpl_err = read_file("feedback_err.html", html_default_err);
 	html_tmpl_ok = read_file("feedback_ok.html", html_default_ok);
-	evhttp_set_gencb(httpd, process_request, (void*)"/feedback");
+	evhttp_set_gencb(httpd, process_request, NULL);
 	event_base_dispatch(base);
 	return 0;
 }
