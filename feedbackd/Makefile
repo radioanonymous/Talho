@@ -3,20 +3,28 @@ ARCH=$(shell uname -m)
 ifeq ($(ARCH),i686)
 OFMT=elf32-i386
 BARCH=i386
+LIBS=$(shell pkg-config --libs libssl)
 endif
 
 ifeq ($(ARCH),x86_64)
 OFMT=elf64-x86-64 
 BARCH=i386:x86-64 
+LIBS=$(shell pkg-config --libs libssl)
+endif
+
+ifeq ($(ARCH),amd64)
+OFMT=elf64-x86-64
+BARCH=i386:x86-64
+LIBS=-lcrypto -lz
 endif
 
 #CFLAGS=-O0 -g -fno-inline -Wall
-CFLAGS=-O2 -Wall
+CFLAGS=-O2 -Wall -I/usr/local/include
 
 OBJCOPY=objcopy -I binary -O $(OFMT) -B $(BARCH) --rename-section .data=.rodata,alloc,load,readonly,data,contents
 
 feedbackd: feedbackd.o libcaptcha.o pages.a
-	$(CXX) -o$@ $^ -levent $(shell pkg-config --libs libssl)
+	$(CXX) -o$@ -L/usr/local/lib $^ -levent $(LIBS)
 
 %.o: %.cpp
 	$(CXX) -c -o$@ $(CFLAGS) $<
