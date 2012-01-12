@@ -325,7 +325,7 @@ static void process_request(struct evhttp_request *req, void *arg)
 					FINZ(text);
 					FINZ(cid);
 #undef FINZ
-					if (text && cid && (1 || cc.validate(strtoul(cid, NULL, 10), text))) {
+					if (text && cid && cc.validate(strtoul(cid, NULL, 10), text)) {
 						tmpl = html_tmpl_ok;
 						p["UID"] = uid;
 						say(raw_message);
