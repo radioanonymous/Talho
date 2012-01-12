@@ -136,18 +136,18 @@ bool Captcha::validate(unsigned id, const char *text)
 }
 
 static Captcha cc;
-static const char *html_tmpl;// = "<html><body><form action=\"${PREFIX}/c${CAPTCHA}\" method=\"POST\"><input type=\"text\" name=\"c\"><input type=\"submit\" value=\"Отправить\"></form><img src=\"${PREFIX}/${CAPTCHA}\"></body></html>";
-static const char *html_tmpl_err;// = "<html><body>Ошибка при вводе captcha!<br><form action=\"${PREFIX}/c${CAPTCHA}\" method=\"POST\"><input type=\"text\" name=\"c\"><input type=\"submit\" value=\"Отправить\"></form><img src=\"${PREFIX}/${CAPTCHA}\"></body></html>";
-static const char *html_tmpl_ok;// = "<html><body>КУ-КА-РЕ-КУ!</body></html>";
+static const char *html_tmpl;
+static const char *html_tmpl_err;
+static const char *html_tmpl_ok;
 static const char *sockaddr = "/tmp/botsock";
 
 static char xval(char c)
 {
 	if (c >= '0' && c <= '9')
 		return c - '0';
-	if (c >='a' && c <='z')
+	if (c >='a' && c <='f')
 		return c - 'a' + 10;
-	if (c >='A' && c <='Z')
+	if (c >='A' && c <='F')
 		return c - 'A' + 10;
 	return 0;
 }
