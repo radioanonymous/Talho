@@ -12,6 +12,7 @@ import re
 def main(bot, args):
 	'''Ответить слушателю. Параметры: <user_id> <message>
 Если в качестве user_id указать восклицательный знак, сообщение будет выглядеть как объявление.
+Если в качестве user_id указать символ @ (или " в русской раскладке), будет использован идентификатор последнего поста. Использовать ОСТОРОЖНО!
 ? user_id — заблеклистить юзера user_id, его сообщения перестанут поступать в диджейку.
 ?? — показать блеклист.
 ?! — очистить блеклист.'''
@@ -31,20 +32,24 @@ def main(bot, args):
 		if args[0] == "?":
 			blacklisting = True
 			del args[0]
-		if len(args[0]) != 12:
+		if args[0] == "@" or args[0] == '"':
+			sender = bot.last_user_id
+		else:
+			sender = args[0]
+		if len(sender) != 12:
 			return _("incorrect name entered, should be 12 symbols.")
 		check = md5()
-		check.update(args[0][:8].encode('utf-8') + salt)
-		if check.hexdigest()[:4] != args[0][8:12]:
+		check.update(sender[:8].encode('utf-8') + salt)
+		if check.hexdigest()[:4] != sender[8:12]:
 			return _("incorrect name entered (checksum invalid).")
 	
 		if blacklisting:
-			bot.blacklist.append(args[0])
-			return _("%s was added to blacklist.") % args[0]
+			bot.blacklist.append(sender)
+			return _("%s was added to blacklist.") % sender
 
-		to = ">>" + args[0]
-		if args[0] in bot.usersposts:
-			userpost = "<span class=\"userpost\">&gt; " + escape(bot.usersposts[args[0]]) + "</span><br/>"
+		to = ">>" + sender
+		if sender in bot.usersposts:
+			userpost = "<span class=\"userpost\">&gt; " + escape(bot.usersposts[sender]) + "</span><br/>"
 	else:
 		to = "!"
         message = " ".join(args[1:])
