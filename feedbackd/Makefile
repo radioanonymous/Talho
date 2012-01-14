@@ -49,5 +49,8 @@ clean:
 tar:
 	tar czf feedbackd.tar.gz feedbackd.cpp libcaptcha.[ch] html/default_*.html Makefile
 
-feedbackd.o: feedbackd.cpp libcaptcha.h
-libcaptcha.o: libcaptcha.c libcaptcha.h
+dep:
+	$(CC) -MM *.c > .dep
+	$(CXX) -MM *.cpp >> .dep
+
+-include .dep
