@@ -63,7 +63,7 @@ def main(bot, args):
 		user_id.insert(0, escape(to))
 	else:
 		user_id.insert(0, "<b>&gt;&gt;ОБЪЯВЛЕНИЕ&lt;&lt;</b>")
-	new_post.insert(0, '[' + datetime.datetime.strftime(datetime.datetime.now(), "%H:%M:%S") + ']')
+	new_post.insert(0, '<span class="timestamp">[' + datetime.datetime.strftime(datetime.datetime.now(), "%H:%M:%S") + ']</span>')
 	new_post.insert(1, user_id)
 	message = re.sub(r'\[([^]]*)\]', lambda x: '<a href="' + x.group(1).replace("&amp;", "&") + '" target="_blank">' + x.group(1) + '</a>', escape(message))
 	message = re.sub(r'\{([^}]*)\}', lambda x: '<a href="' + x.group(1).replace("&amp;", "&") + '" target="_blank"><img style="max-width: 200px; max-height: 200px;display: inline;" src="' + x.group(1).replace("&amp;", "&") + '"/></a>', message)
