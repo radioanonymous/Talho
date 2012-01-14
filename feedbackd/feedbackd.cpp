@@ -16,9 +16,17 @@
 #include <sys/un.h>
 #include <openssl/md5.h>
 
-#define FEEDBACK_PREFIX		"/feedback"
-#define	UID_SALT			"anon.fm"
-#define	DIGEST_SALT			"type_random_letters_here"
+#ifndef FEEDBACK_LOCATION
+#	define FEEDBACK_LOCATION		"/feedback"
+#endif
+
+#ifndef UID_SALT
+#	define	UID_SALT			"anon.fm"
+#endif
+
+#ifndef DIGEST_SALT
+#	define	DIGEST_SALT			"type_random_letters_here"
+#endif
 
 struct cdata {
 	char			content[6];
@@ -235,7 +243,7 @@ std::string generate_uid(struct evhttp_request *req)
 
 static void process_request(struct evhttp_request *req, void *arg)
 {
-	static const std::string location = FEEDBACK_PREFIX;
+	static const std::string location = FEEDBACK_LOCATION;
 	struct evbuffer *buf = evbuffer_new();
 	if (!buf)
 		return;

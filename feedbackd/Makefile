@@ -18,13 +18,15 @@ BARCH=i386:x86-64
 LIBS=-lcrypto -lz
 endif
 
-#CFLAGS=-O0 -g -fno-inline -Wall
-CFLAGS=-O2 -Wall -I/usr/local/include
+-include Makefile.local
 
-OBJCOPY=objcopy -I binary -O $(OFMT) -B $(BARCH) --rename-section .data=.rodata,alloc,load,readonly,data,contents
+CFLAGS?=-O2 -Wall -I/usr/local/include
+LDFLAGS?=-L/usr/local/lib
+
+OBJCOPY?=objcopy -I binary -O $(OFMT) -B $(BARCH) --rename-section .data=.rodata,alloc,load,readonly,data,contents
 
 feedbackd: feedbackd.o libcaptcha.o pages.a
-	$(CXX) -o$@ -L/usr/local/lib $^ -levent $(LIBS)
+	$(CXX) -o$@ $(LDFLAGS) $^ -levent $(LIBS)
 
 %.o: %.cpp
 	$(CXX) -c -o$@ $(CFLAGS) $<

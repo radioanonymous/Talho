@@ -6,3 +6,5 @@ vkproxy_settings.py
 *.[ao]
 feedbackd/feedbackd
 feedbackd/*.html
+Makefile.local
+*.tar.gz
