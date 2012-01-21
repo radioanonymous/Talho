@@ -190,7 +190,6 @@ def mounts_info(client, *args):
                     nick = n[0].text
                 else:
                     nick = "?unknown?"
-                print nick
                 result += ("Маунт %s *занят* %s" % (mount, nick.encode('utf-8'))) + "\n"
             else:
                 result += "Маунт %s *свободен*" % mount + "\n"
