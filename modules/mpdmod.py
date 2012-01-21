@@ -12,7 +12,9 @@ import time
 import HTMLParser
 import traceback
 import sys
-from decoder import decoder
+from lxml import etree
+import xml.dom
+import traceback
 
 from misc import _
 
@@ -179,12 +181,20 @@ def mounts_info(client, *args):
         mounts_to_check = ( "/first", "/second" )
         admin_page_opener = IcecastAdminOpener()
         page = admin_page_opener.open("http://127.0.0.1:8000/admin/").read()
+        status = etree.fromstring(page.decode('utf-8'))
         for mount in mounts_to_check:
-            if "<h3>Mount Point %s</h3>" % mount in page:
-                result += "Маунт %s *занят*" % mount + "\n"
+            node = status.xpath("/icestats/source[@mount='%s']" % mount)
+            if len(node) > 0:
+                n = node[0].xpath("dj_nick")
+                if len(n):
+                    nick = n[0].text
+                else:
+                    nick = "?unknown?"
+                print nick
+                result += ("Маунт %s *занят* %s" % (mount, nick.encode('utf-8'))) + "\n"
             else:
                 result += "Маунт %s *свободен*" % mount + "\n"
-                
+
         return result
     except:
         return _("unknown fucking shit happened.")
