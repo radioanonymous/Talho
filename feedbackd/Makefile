@@ -25,7 +25,7 @@ LDFLAGS?=-L/usr/local/lib
 
 OBJCOPY?=objcopy -I binary -O $(OFMT) -B $(BARCH) --rename-section .data=.rodata,alloc,load,readonly,data,contents
 
-feedbackd: feedbackd.o libcaptcha.o pages.a
+feedbackd: feedbackd.o http_client.o libcaptcha.o pages.a
 	$(CXX) -o$@ $(LDFLAGS) $^ -levent $(LIBS)
 
 %.o: %.cpp
@@ -40,7 +40,7 @@ feedbackd: feedbackd.o libcaptcha.o pages.a
 	 $(OBJCOPY) --redefine-sym _binary_tmp_html_start=html_default_$(shell echo $@ | sed -e 's/^default_//' -e 's/\.o//') -S -K html_default_$(shell echo $@ | sed -e 's/^default_//' -e 's/\.o//') tmp.html $@
 	rm -f tmp.html
 
-pages.a: default_ask.o default_ok.o default_err.o
+pages.a: default_ask.o default_ok.o default_err.o default_skype.o
 	ar cru $@ $^
 
 clean:
@@ -52,5 +52,8 @@ tar:
 dep:
 	$(CC) -MM *.c > .dep
 	$(CXX) -MM *.cpp >> .dep
+
+skype: skype.o http_client.o
+	$(CXX) -o $@ $^ -levent
 
 -include .dep

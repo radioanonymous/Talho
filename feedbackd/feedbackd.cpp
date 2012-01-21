@@ -15,6 +15,7 @@
 #include <netinet/in.h>
 #include <sys/un.h>
 #include <openssl/md5.h>
+#include "http_client.h"
 
 #ifndef FEEDBACK_LOCATION
 #	define FEEDBACK_LOCATION		"/feedback"
@@ -26,6 +27,14 @@
 
 #ifndef DIGEST_SALT
 #	define	DIGEST_SALT			"type_random_letters_here"
+#endif
+
+#ifndef	SKYPE_PREFIX
+#	define	SKYPE_PREFIX		"/skype"
+#endif
+
+#ifndef	SKYPE_CACHE_TIME
+#	define	SKYPE_CACHE_TIME	15
 #endif
 
 struct cdata {
@@ -153,6 +162,7 @@ static Captcha cc;
 static const char *html_tmpl;
 static const char *html_tmpl_err;
 static const char *html_tmpl_ok;
+static const char *html_tmpl_skype;
 static const char *sockaddr = "/tmp/botsock";
 
 static char xval(char c)
@@ -241,16 +251,118 @@ std::string generate_uid(struct evhttp_request *req)
 	return result;
 }
 
+class skype_status {
+	typedef std::map<std::string, std::pair<http_request*, skype_status*> > request_queue;
+	typedef std::map<std::string, std::pair<time_t,int> > state_cache;
+	typedef void (*callback_proc)(void *data, int state);
+	static request_queue srq;
+	static state_cache sch;
+	/* Skype callback context */
+	callback_proc cb;
+	void *cb_data;
+	skype_status *next;
+	std::string login;
+	skype_status(const std::string &login, callback_proc cb, void *data, skype_status *next)
+		: cb(cb), cb_data(data), next(next), login(login) {}
+	static void on_ready(void *ctx, http_request *req);
+public:
+	enum {ONLINE, DND, OFFLINE};
+	static void fetch_state(event_base *base, const std::string &login, callback_proc callback, void *data); 
+};
+
+skype_status::request_queue skype_status::srq;
+skype_status::state_cache skype_status::sch;
+
+void skype_status::fetch_state(event_base *base, const std::string &login, callback_proc callback, void *data)
+{
+	const state_cache::const_iterator cached = sch.find(login);
+	if (cached != sch.end() && cached->second.first + SKYPE_CACHE_TIME > time(NULL)) {
+		callback(data, cached->second.second);
+	} else {
+		std::string url = "http://mystatus.skype.com/smallicon/" + login;
+		request_queue::iterator rq = srq.find(login);
+		if (rq == srq.end()) {
+			skype_status *status = new skype_status(login, callback, data, NULL);
+			http_request *req = new http_request(base, url.c_str(), EVHTTP_REQ_HEAD);
+			srq.insert(request_queue::value_type(login,
+						std::pair<http_request*, skype_status*>(req, status)));
+			req->enqueue(on_ready, status);
+		} else {
+			rq->second.second = new skype_status(login, callback, data, rq->second.second);
+		}
+	}
+}
+
+void skype_status::on_ready(void *ctx, http_request *req)
+{
+	static const struct {int len, state;} status_map[] = {
+		{502, ONLINE},		// chat
+		{428, ONLINE},		// online
+		{546, DND},			// away
+		{490, DND},			// dnd
+		{500, OFFLINE},		// na
+		{376, OFFLINE}		// offline
+	};
+	int state = OFFLINE;
+	const char *clen = evhttp_find_header(req->get_request()->input_headers, "Content-Length");
+	if (clen) {
+		int len = atoi(clen);
+		for (unsigned i = 0; i < sizeof(status_map) / sizeof(*status_map); i++)
+			if (len == status_map[i].len) {
+				state = status_map[i].state;
+				break;
+			}
+	}
+	sch[((skype_status*)ctx)->login] = std::pair<time_t,int>(time(NULL), state);
+	request_queue::iterator r = srq.find(((skype_status*)ctx)->login);
+	if (r != srq.end()) {
+		for (skype_status *s = r->second.second; s; ) {
+			skype_status *next = s->next;
+			s->cb(s->cb_data, state);
+			delete s;
+			s = next;
+		}
+		delete r->second.first;
+		srq.erase(r);
+	}
+}
+
+struct skype_ctx {
+	struct evhttp_request *req;
+	struct evbuffer *buf;
+	std::string login;
+	int mode;
+	skype_ctx(struct evhttp_request *req, struct evbuffer *buf) : req(req), buf(buf), mode(0) {}
+	~skype_ctx() {evbuffer_free(buf);}
+
+	static void reply(void *ctx, int state);
+};
+
+void skype_ctx::reply(void *ctx, int state)
+{
+	skype_ctx *self = (skype_ctx*)ctx;
+	if (self->mode) {
+		evhttp_add_header(self->req->output_headers, "Content-Type", "application/x-javascript; charset=UTF-8");
+		evbuffer_add_printf(self->buf, "{login: \"%s\", state: \"%d\"}", self->login.c_str(), state);
+	} else {
+		param_t args;
+		evhttp_add_header(self->req->output_headers, "Content-Type", "text/html; charset=UTF-8");
+		args["LOGIN"] = self->login;
+		templater(self->buf, html_tmpl_skype, args);
+	}
+	evhttp_send_reply(self->req, HTTP_OK, "OK", self->buf);
+	delete self;
+}
+
 static void process_request(struct evhttp_request *req, void *arg)
 {
-	static const std::string location = FEEDBACK_LOCATION;
 	struct evbuffer *buf = evbuffer_new();
 	if (!buf)
 		return;
 	generate_uid(req);
 	const char *uri = evhttp_request_uri(req);
-	if (memcmp(uri, location.c_str(), location.size()) == 0) {
-		uri += location.size();
+	if (memcmp(uri, FEEDBACK_LOCATION, sizeof(FEEDBACK_LOCATION) - 1) == 0) {
+		uri += sizeof(FEEDBACK_LOCATION) - 1;
 		if (*uri == '/')
 			uri++;
 		if (evhttp_request_get_command(req) == EVHTTP_REQ_GET && isdigit(*uri)) {
@@ -264,7 +376,7 @@ static void process_request(struct evhttp_request *req, void *arg)
 				form_captcha = "cid",
 				form_check = "check",
 				form_msg = "msg";
-			p["PREFIX"] = location;
+			p["PREFIX"] = FEEDBACK_LOCATION;
 			p["PCAPTCHA"] = form_captcha;
 			p["PCHECK"] = form_check;
 			p["PMSG"] = form_msg;
@@ -347,6 +459,20 @@ static void process_request(struct evhttp_request *req, void *arg)
 		evhttp_send_reply(req, HTTP_OK, "OK", buf);
 		evbuffer_free(buf);
 		return;
+	/* Skype icon */
+	} else if (memcmp(uri, SKYPE_PREFIX, sizeof(SKYPE_PREFIX) - 1) == 0) {
+		struct skype_ctx *ctx = new skype_ctx(req, buf);
+		uri += sizeof(SKYPE_PREFIX) - 1;
+		int len = strlen(uri);
+		if (len > 4 && memcmp(uri + len - 3, ".js", 3) == 0) {
+			ctx->mode = 1;
+			ctx->login.assign(uri + 1, uri + len - 3);
+		} else {
+			ctx->login = uri + 1;
+		}
+		skype_status::fetch_state(
+				evhttp_connection_get_base(evhttp_request_get_connection(req)), ctx->login, skype_ctx::reply, ctx);
+		return;
 	}
 notfound:
 	evhttp_add_header(req->output_headers, "Content-Type", "text/plain");
@@ -374,7 +500,7 @@ static char *read_file(const char *fname, const char *default_contents)
 	return result;
 }
 
-extern char html_default_ask[], html_default_err[], html_default_ok[];
+extern char html_default_ask[], html_default_err[], html_default_ok[], html_default_skype[];
 
 int main(int argc, char **argv)
 {
@@ -397,7 +523,10 @@ int main(int argc, char **argv)
 	html_tmpl = read_file("feedback_ask.html", html_default_ask);
 	html_tmpl_err = read_file("feedback_err.html", html_default_err);
 	html_tmpl_ok = read_file("feedback_ok.html", html_default_ok);
-	evhttp_set_gencb(httpd, process_request, NULL);
+	html_tmpl_skype = read_file("skype_status.html", html_default_skype);
+	evhttp_set_gencb(httpd, process_request, base);
 	event_base_dispatch(base);
+	evhttp_free(httpd);
+	event_base_free(base);
 	return 0;
 }
