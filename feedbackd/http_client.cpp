@@ -109,10 +109,15 @@ http_request::renew_request()
 	if (m_cn)
 		evhttp_connection_free(m_cn);
 
+#if !defined(_EVENT_NUMERIC_VERSION) || _EVENT_NUMERIC_VERSION < 0x02000000
+	m_cn = evhttp_connection_new(m_host.c_str(), m_port);
+	evhttp_connection_set_base(m_cn, m_base);
+#else
 	m_cn = evhttp_connection_base_new(
 		m_base, NULL, 
 		m_host.c_str(),
 		m_port);
+#endif
 
 	m_req = evhttp_request_new(http_request::download_callback, this);
 

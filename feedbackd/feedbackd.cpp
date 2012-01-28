@@ -356,6 +356,7 @@ void skype_ctx::reply(void *ctx, int state)
 
 static void process_request(struct evhttp_request *req, void *arg)
 {
+	struct event_base *base = (struct event_base*)arg;
 	struct evbuffer *buf = evbuffer_new();
 	if (!buf)
 		return;
@@ -470,8 +471,7 @@ static void process_request(struct evhttp_request *req, void *arg)
 		} else {
 			ctx->login = uri + 1;
 		}
-		skype_status::fetch_state(
-				evhttp_connection_get_base(evhttp_request_get_connection(req)), ctx->login, skype_ctx::reply, ctx);
+		skype_status::fetch_state(base, ctx->login, skype_ctx::reply, ctx);
 		return;
 	}
 notfound:
