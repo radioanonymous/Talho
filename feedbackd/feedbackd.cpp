@@ -15,10 +15,30 @@
 #include <netinet/in.h>
 #include <sys/un.h>
 #include <openssl/md5.h>
+#include <ctemplate/template.h>
 #include "http_client.h"
+
+using ctemplate::TemplateDictionary;
+using ctemplate::LoadTemplate;
+using ctemplate::StringToTemplateCache;
+using ctemplate::STRIP_WHITESPACE;
+using ctemplate::TemplateString;
+using ctemplate::ExpandTemplate;
+
+static const TemplateString tmpl_ask("feedback_ask.html"), tmpl_ok("feedback_ok.html"), tmpl_skype("skype_status.html");
+
+namespace id {
+#include "tpl_ask.h"
+#include "tpl_ok.h"
+#include "tpl_skype.h"
+};
 
 #ifndef FEEDBACK_LOCATION
 #	define FEEDBACK_LOCATION		"/feedback"
+#endif
+
+#ifndef	FEEDBACK_MAX_LENGTH
+#	define FEEDBACK_MAX_LENGTH		140
 #endif
 
 #ifndef UID_SALT
@@ -37,17 +57,38 @@
 #	define	SKYPE_CACHE_TIME	15
 #endif
 
+static int utf8_strlen(const std::string &str)
+{
+	const unsigned char *ptr = (const unsigned char*)str.c_str();
+	int len = 0;
+	while (*ptr) {
+		/* ASCII symbols */
+		if (*ptr < 0x80) {
+			ptr++;
+		} else if ((*ptr & 0xe0) == 0xc0 && (ptr[1] & 0xc0) == 0x80) {
+			/* 0x80 - 0x7FF */
+			ptr += 2;
+		} else if ((*ptr & 0xf0) == 0xe0 && (ptr[1] & 0xc0) == 0x80 && (ptr[2] & 0xc0) == 0x80) {
+			/* 0x800 - 0xffff */
+			ptr += 3;
+		} else {
+			ptr++;
+			while ((*ptr & 0xc0) == 0x80) ptr++;
+		}
+		len++;
+	}
+	return len;
+}
+
 struct cdata {
 	char			content[6];
 	unsigned char	gif[GIFSIZE];
 	time_t			ctime;
 };
 
-typedef std::map<std::string, std::string> param_t;
-
 class Captcha {
 public:
-	void		show_html(struct evbuffer *buf, const char *tmpl, param_t &p);
+	void		show_html(struct evbuffer *buf, const TemplateString &tmpl, TemplateDictionary &p);
 	bool		show_gif(struct evbuffer *buf, unsigned id);
 	bool		validate(unsigned id, const char *text);
 private:
@@ -100,40 +141,27 @@ unsigned Captcha::generate()
 	}
 }
 
+class evbuffer_emitter : public ctemplate::ExpandEmitter {
+	struct evbuffer *out;
+public:
+	evbuffer_emitter(struct evbuffer *out) : out(out) {}
+	virtual void Emit(char c) { evbuffer_add(out, &c, 1); }
+	virtual void Emit(const std::string& s) { evbuffer_add(out, s.c_str(), s.length()); }
+	virtual void Emit(const char* s) { evbuffer_add(out, s, strlen(s)); }
+	virtual void Emit(const char* s, size_t slen) { evbuffer_add(out, s, slen); }
+};
 
-static void templater(struct evbuffer *buf, const char *tmpl, param_t &args)
+static void templater(struct evbuffer *buf, const TemplateString &tmpl, TemplateDictionary &args)
 {
-	static const char marker[] = "${";
-	const char *begin = tmpl, *end;
-	std::string name;
-	while (*begin) {
-		end = strstr(begin, marker);
-		if (end) {
-			evbuffer_add(buf, begin, end - begin);
-			const char *n = strchr(end, '}');
-			if (n) {
-				name.assign(end + sizeof(marker) - 1, n);
-				param_t::const_iterator v = args.find(name);
-				if (v != args.end())
-					evbuffer_add(buf, v->second.c_str(), v->second.size());
-				begin = n + 1;
-			} else {
-				evbuffer_add(buf, end, sizeof(marker) - 1);
-				begin = end + sizeof(marker) - 1;
-			}
-		} else {
-			evbuffer_add(buf, begin, strlen(begin));
-			break;
-		}
-	}
+	evbuffer_emitter out(buf);
+	ExpandTemplate(tmpl, STRIP_WHITESPACE, &args, &out);
 }
 
-void Captcha::show_html(struct evbuffer *buf, const char *tmpl, param_t &args)
+void Captcha::show_html(struct evbuffer *buf, const TemplateString &tmpl, TemplateDictionary &args)
 {
-	char cap[32];
-	sprintf(cap, "%u", generate());
-	args["CAPTCHA"] = cap;
-	args["GIF"] = args["PREFIX"] + "/" + cap + ".gif";
+	unsigned cap = generate();
+	args.SetIntValue(id::kda_CAPTCHA, cap);
+	args.SetFormattedValue(id::kda_GIF, "%s/%u.gif", FEEDBACK_LOCATION, cap);
 	templater(buf, tmpl, args);
 }
 
@@ -159,10 +187,6 @@ bool Captcha::validate(unsigned id, const char *text)
 }
 
 static Captcha cc;
-static const char *html_tmpl;
-static const char *html_tmpl_err;
-static const char *html_tmpl_ok;
-static const char *html_tmpl_skype;
 static const char *sockaddr = "/tmp/botsock";
 
 static char xval(char c)
@@ -345,10 +369,11 @@ void skype_ctx::reply(void *ctx, int state)
 		evhttp_add_header(self->req->output_headers, "Content-Type", "application/x-javascript; charset=UTF-8");
 		evbuffer_add_printf(self->buf, "{login: \"%s\", state: \"%d\"}", self->login.c_str(), state);
 	} else {
-		param_t args;
+		TemplateDictionary args("skype");
 		evhttp_add_header(self->req->output_headers, "Content-Type", "text/html; charset=UTF-8");
-		args["LOGIN"] = self->login;
-		templater(self->buf, html_tmpl_skype, args);
+		if (state == skype_status::ONLINE)
+			args.SetValueAndShowSection(id::kds_LOGIN, self->login, id::kds_IF_ONLINE);
+		templater(self->buf, tmpl_skype, args);
 	}
 	evhttp_send_reply(self->req, HTTP_OK, "OK", self->buf);
 	delete self;
@@ -372,18 +397,19 @@ static void process_request(struct evhttp_request *req, void *arg)
 				goto notfound;
 			evhttp_add_header(req->output_headers, "Content-Type", "image/gif");
 		} else {
-			param_t p;
+			TemplateDictionary p("feedback");
 			static const std::string
 				form_captcha = "cid",
 				form_check = "check",
 				form_msg = "msg";
-			p["PREFIX"] = FEEDBACK_LOCATION;
-			p["PCAPTCHA"] = form_captcha;
-			p["PCHECK"] = form_check;
-			p["PMSG"] = form_msg;
+			p.SetValue(id::kda_PREFIX, FEEDBACK_LOCATION);
+			p.SetValue(id::kda_PCAPTCHA, form_captcha);
+			p.SetValue(id::kda_PCHECK, form_check);
+			p.SetValue(id::kda_PMSG, form_msg);
+			p.SetIntValue(id::kda_MAXLEN, FEEDBACK_MAX_LENGTH);
 			evhttp_add_header(req->output_headers, "Content-Type", "text/html; charset=UTF-8");
 			if (evhttp_request_get_command(req) == EVHTTP_REQ_POST) {
-				const char *tmpl = html_tmpl_err;
+				const TemplateString *tmpl = &tmpl_ask;
 				evbuffer *in = evhttp_request_get_input_buffer(req);
 				char *data = (char*)EVBUFFER_DATA(in);
 				while (*uri && !isdigit(*uri))
@@ -410,10 +436,8 @@ static void process_request(struct evhttp_request *req, void *arg)
 					/* message text */
 					what = form_msg + "=";
 					char *msg = strstr(&post[0], what.c_str());
-					std::string uid = generate_uid(req);
-					std::string raw_message = "From " + uid + "  ";
+					std::string message;
 					if (msg) {
-						std::string message;
 						for (msg = msg + what.size(); *msg && *msg != '&'; msg++) {
 							char out = *msg;
 							switch (out) {
@@ -426,35 +450,30 @@ static void process_request(struct evhttp_request *req, void *arg)
 							case '+':
 								out = 0x20;
 							}
-							switch (out) {
-							case '<':
-								message += "&lt;";
-								break;
-							case '>':
-								message += "&gt;";
-								break;
-							case '&':
-								message += "&amp;";
-								break;
-							default:
-								message += out;
-							}
-							raw_message += out;
+							message += out;
 						}
-						p["MSG"] = message;
+						p.SetValue(id::kda_MSG, message);
 					}
 					FINZ(text);
 					FINZ(cid);
 #undef FINZ
 					if (text && cid && cc.validate(strtoul(cid, NULL, 10), text)) {
-						tmpl = html_tmpl_ok;
-						p["UID"] = uid;
-						say(raw_message);
+						if (text && utf8_strlen(message) <= FEEDBACK_MAX_LENGTH) {
+							std::string uid = generate_uid(req);
+							std::string raw_message = "From " + uid + "  " + message;
+							tmpl = &tmpl_ok;
+							p.SetValue(id::kdo_UID, uid);
+							say(raw_message);
+						} else {
+							p.ShowSection(id::kda_IF_MSG_TOO_LONG);
+						}
+					} else {
+						p.ShowSection(id::kda_IF_BAD_CAPTCHA);
 					}
 				}
-				cc.show_html(buf, tmpl, p);
+				cc.show_html(buf, *tmpl, p);
 			} else {
-				cc.show_html(buf, html_tmpl, p);
+				cc.show_html(buf, tmpl_ask, p);
 			}
 		}
 		evhttp_send_reply(req, HTTP_OK, "OK", buf);
@@ -481,26 +500,7 @@ notfound:
 	evbuffer_free(buf);
 }
 
-static char *read_file(const char *fname, const char *default_contents)
-{
-	struct stat st;
-	char *result = (char*)default_contents;
-	if (stat(fname, &st) == 0 && (S_ISREG(st.st_mode) || S_ISLNK(st.st_mode))) {
-		int fd = open(fname, O_RDONLY);
-		if (fd != -1) {
-			result = new char[st.st_size + 1];
-			result[st.st_size] = 0;
-			if (read(fd, result, st.st_size) != st.st_size) {
-				delete []result;
-				result = (char*)default_contents;
-			}
-			close(fd);
-		}
-	}
-	return result;
-}
-
-extern char html_default_ask[], html_default_err[], html_default_ok[], html_default_skype[];
+extern char html_default_ask[], html_default_ok[], html_default_skype[];
 
 int main(int argc, char **argv)
 {
@@ -520,10 +520,12 @@ int main(int argc, char **argv)
 		fprintf(stderr, "Can't bind http socket!\n");
 		return 1;
 	}
-	html_tmpl = read_file("feedback_ask.html", html_default_ask);
-	html_tmpl_err = read_file("feedback_err.html", html_default_err);
-	html_tmpl_ok = read_file("feedback_ok.html", html_default_ok);
-	html_tmpl_skype = read_file("skype_status.html", html_default_skype);
+	if (!LoadTemplate(tmpl_ask, STRIP_WHITESPACE))
+		StringToTemplateCache(tmpl_ask, html_default_ask, STRIP_WHITESPACE);
+	if (!LoadTemplate(tmpl_ok, STRIP_WHITESPACE))
+		StringToTemplateCache(tmpl_ok, html_default_ok, STRIP_WHITESPACE);
+	if (!LoadTemplate(tmpl_skype, STRIP_WHITESPACE))
+		StringToTemplateCache(tmpl_skype, html_default_skype, STRIP_WHITESPACE);
 	evhttp_set_gencb(httpd, process_request, base);
 	event_base_dispatch(base);
 	evhttp_free(httpd);

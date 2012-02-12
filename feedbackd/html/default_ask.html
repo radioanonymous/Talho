@@ -17,17 +17,25 @@ table tr.cap td {
 
 <body>
 <h2>Отправить сообщение в диджейку</h2>
-<form method="POST" action="${PREFIX}">
+<form method="POST" action="{{PREFIX}}">
 <fieldset style="display:inline">
-	<legend>Текст сообщения (не более 140 символов)</legend>
+	<legend>Текст сообщения (не более {{MAXLEN}} символов)</legend>
 	<span>
-		<input type="hidden" name="${PCAPTCHA}" value="${CAPTCHA}">
+		<input type="hidden" name="{{PCAPTCHA}}" value="{{CAPTCHA}}">
 		<table cellpadding="0" cellspacing="0">
 			<tr>
-				<td colspan="2"><textarea name="${PMSG}" cols="40" rows="6" maxlength="140"></textarea><br>
+				<td colspan="2"><textarea name="{{PMSG}}" cols="40" rows="6" maxlength="{{MAXLEN}}">{{MSG:h}}</textarea><br>
+{{#IF_BAD_CAPTCHA}}
+			<tr>
+				<td colspan="2"><font color="red"><strong>Неверный код подтверждения</strong></font>
+{{/IF_BAD_CAPTCHA}}
+{{#IF_MSG_TOO_LONG}}
+			<tr>
+				<td colspan="2"><font color="red"><strong>Длина сообщения не должна превышать {{MAXLEN}} символов</strong></font>
+{{/IF_MSG_TOO_LONG}}
 			<tr class="cap">
-				<td width="50%" style="text-align: right"><img src="${GIF}">
-				<td width="50%" style="text-align: left"><input type="text" name="${PCHECK}" style="width: 7em">
+				<td width="50%" style="text-align: right"><img src="{{GIF}}">
+				<td width="50%" style="text-align: left"><input type="text" name="{{PCHECK}}" style="width: 7em">
 			<tr>
 				<td colspan="2"><input type="submit" value="Отправить">
 		</table>
