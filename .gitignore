@@ -6,5 +6,8 @@ vkproxy_settings.py
 *.[ao]
 feedbackd/feedbackd
 feedbackd/*.html
+feedbackd/tpl_*.h
+feedbackd/mkcaptcha
 Makefile.local
+tags
 *.tar.gz

@@ -25,6 +25,11 @@ LDFLAGS?=-L/usr/local/lib
 
 OBJCOPY?=objcopy -I binary -O $(OFMT) -B $(BARCH) --rename-section .data=.rodata,alloc,load,readonly,data,contents
 
+all: feedbackd
+
+mkcaptcha: mkcaptcha.c
+	$(CC) -o$@ -g -O0 $< `freetype-config --cflags --libs`
+
 feedbackd: feedbackd.o http_client.o libcaptcha.o pages.a
 	$(CXX) -o$@ $(LDFLAGS) $^ -levent -lctemplate $(LIBS)
 
@@ -47,7 +52,7 @@ pages.a: default_ask.o default_ok.o default_skype.o
 	ar cru $@ $^
 
 clean:
-	rm -f feedbackd *.o *.a tpl_*.h
+	rm -f feedbackd *.o *.a tpl_*.h mkcaptcha
 
 tar:
 	tar czf feedbackd.tar.gz feedbackd.cpp libcaptcha.[ch] html/default_*.html Makefile
@@ -58,3 +63,4 @@ skype: skype.o http_client.o
 http_client.o: http_client.cpp http_client.h
 skype.o: skype.cpp http_client.h
 feedbackd.o: feedbackd.cpp libcaptcha.h http_client.h tpl_ask.h tpl_ok.h tpl_skype.h
+libcaptcha.o: libcaptcha.c en_glyphs.h num_glyphs.h
