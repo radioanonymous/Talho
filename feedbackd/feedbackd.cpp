@@ -33,6 +33,9 @@ namespace id {
 #include "tpl_skype.h"
 };
 
+#define	PRERENDER_GIFS
+
+
 #ifndef FEEDBACK_LOCATION
 #	define FEEDBACK_LOCATION		"/feedback"
 #endif
@@ -81,64 +84,101 @@ static int utf8_strlen(const std::string &str)
 }
 
 struct cdata {
+	unsigned		id;
 	char			content[6];
+#ifdef	PRERENDER_GIFS
 	unsigned char	gif[GIFSIZE];
+#endif
 	time_t			ctime;
+	struct cdata	*prev, *next;
 };
 
 class Captcha {
 public:
+	Captcha() : m_head(NULL), m_tail(NULL) {}
 	void		show_html(struct evbuffer *buf, const TemplateString &tmpl, TemplateDictionary &p);
 	bool		show_gif(struct evbuffer *buf, unsigned id);
 	bool		validate(unsigned id, const char *text);
 private:
 	unsigned generate();
-	cdata *new_captcha(cdata *c);
+	cdata *new_captcha(unsigned id, time_t now);
 	typedef std::map<unsigned, cdata*> ccache;
+	cdata		*m_head, *m_tail;
 
 	ccache captchas;
 };
 
-cdata *Captcha::new_captcha(cdata *c)
+cdata *Captcha::new_captcha(unsigned id, time_t now)
 {
-	if (!c)
-		c = new cdata;
-	unsigned char im[70*200];
+	cdata *c = new cdata;
+	if (m_head)
+		m_head->prev = c;
+	c->next = m_head;
+	m_head = c;
+	if (!m_tail)
+		m_tail = c;
+	c->prev = NULL;
 
+	c->id = id;
+	c->ctime = now;
+#ifdef	PRERENDER_GIFS
+	unsigned char im[70*200];
 	captcha(im, (unsigned char*)c->content);
 	makegif(im, c->gif);
+#else
+	captcha_generate((unsigned char*)c->content);
+#endif
 	return c;
 }
 
 unsigned Captcha::generate()
 {
+	unsigned r = 0;
 	time_t now = time(NULL);
-	if (captchas.size() > 1000) {
-		Captcha::ccache::iterator i = captchas.begin(), min = i;
-		time_t mt = min->second->ctime;
-		while (++i != captchas.end())
-			if (i->second->ctime < mt) {
-				min = i;
-				mt = min->second->ctime;
+	/* Remove all old captchas first */
+	while (m_tail && (m_tail->ctime + 300 < now || captchas.size() > 5000)) { // don't allow number of captchas to grow above 5000 entries
+		cdata *prev = m_tail->prev;
+		r = m_tail->id;
+		captchas.erase(m_tail->id);
+		delete m_tail;
+		m_tail = prev;
+	}
+	if (m_tail)
+		m_tail->next = NULL;
+	else
+		m_head = NULL;
+
+	if (!r) {
+		/* Find free identificator for captcha */
+		Captcha::ccache::iterator c;
+		for (unsigned i = 0; i < 100; i++) {
+			r = random() % 900000 + 100000;
+			Captcha::ccache::iterator c = captchas.find(r);
+			if (c == captchas.end()) {
+				captchas.insert(Captcha::ccache::value_type(r, new_captcha(r, now)));
+				return r;
 			}
-		delete min->second;
-		captchas.erase(min);
-	}
-
-	while (1) {
-		unsigned r = random() % 900000 + 100000;
-
-		Captcha::ccache::iterator c = captchas.find(r);
-		if (c == captchas.end()) {
-			Captcha::ccache::value_type cap(r,new_captcha(NULL));
-			captchas.insert(cap);
-			return r;
-		} else if (c->second->ctime + 300 > now || captchas.size() > 1000) {
-			c->second->ctime = now;
-			new_captcha(c->second);
-			return r;
 		}
+		/* We haven't succeeded to find spare id in 100 hits, so make two users solve same captcha (updating it's ctime) */
+		cdata *cap = c->second;
+		if (cap->next)
+			cap->next->prev = cap->prev;
+		else
+			m_tail = cap->prev;
+		if (cap->prev) {
+			cap->prev->next = cap->next;
+			cap->next = m_head;
+			if (m_head)
+				m_head->prev = cap;
+			m_head = cap;
+		}
+		cap->ctime = now;
+	} else {
+		/* Generate new captcha */
+		captchas.insert(Captcha::ccache::value_type(r, new_captcha(r, now)));
 	}
+
+	return r;
 }
 
 class evbuffer_emitter : public ctemplate::ExpandEmitter {
@@ -169,7 +209,15 @@ bool Captcha::show_gif(struct evbuffer *buf, unsigned id)
 {
 	Captcha::ccache::const_iterator c = captchas.find(id);
 	if (c != captchas.end()) {
+#ifdef	PRERENDER_GIFS
 		evbuffer_add(buf, c->second->gif, GIFSIZE);
+#else
+		unsigned char im[70*200];
+		unsigned char gif[GIFSIZE];
+		captcha_render(im, (const unsigned char*)c->second->content);
+		makegif(im, gif);
+		evbuffer_add(buf, gif, GIFSIZE);
+#endif
 		return true;
 	}
 	return false;
@@ -179,8 +227,21 @@ bool Captcha::validate(unsigned id, const char *text)
 {
 	Captcha::ccache::iterator c = captchas.find(id);
 	if (c != captchas.end()) {
+		cdata *cap = c->second;
 		bool match = strncasecmp(text, c->second->content, sizeof(c->second->content) - 1) == 0;
+
+		/* Erase captcha */
+		if (cap->prev)
+			cap->prev->next = cap->next;
+		else
+			m_head = cap->next;
+		if (cap->next)
+			cap->next->prev = cap->prev;
+		else
+			m_tail = cap->prev;
+		delete cap;
 		captchas.erase(c);
+	
 		return match;
 	}
 	return false;

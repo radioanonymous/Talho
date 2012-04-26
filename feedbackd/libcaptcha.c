@@ -137,7 +137,40 @@ static void blur(unsigned char im[70*200]) {
 #include "num_glyphs.h"
 #define NUM_GLYPHS	(sizeof(letters) / sizeof(*letters) - 1)
 
+void captcha_generate(unsigned char l[6])
+{
+	unsigned i;
+	for (i = 0; i < 5; i++)
+		l[i] = letters[random() % NUM_GLYPHS];
+	l[5] = 0;
+}
+
+void captcha_render(unsigned char im[70*200], const unsigned char lts[6])
+{
+	unsigned i;
+	unsigned char swr[200];
+	uint8_t s1,s2;
+
+	int f=open("/dev/urandom",O_RDONLY);
+	read(f,swr,200); read(f,dr,sizeof(dr)); read(f,&s1,1); read(f,&s2,1);
+	close(f);
+
+	memset(im,0xff,200*70); s1=s1&0x7f; s2=s2&0x3f;
+	int p=30;
+	for (i = 0; i < 5; i++) {
+		unsigned l;
+		for (l = 0; l < sizeof(letters) / sizeof(*letters) - 1; l++)
+			if (letters[l] == lts[i])
+				break;
+		if (l == sizeof(letters) / sizeof(*letters) - 1)
+			l = 0;
+		p = letter(l,p,im,swr,s1,s2);
+	}
+	line(im,swr,s1); dots(im); blur(im);
+}
+
 void captcha(unsigned char im[70*200], unsigned char l[6]) {
+	unsigned i;
 	unsigned char swr[200];
 	uint8_t s1,s2;
 
@@ -145,10 +178,15 @@ void captcha(unsigned char im[70*200], unsigned char l[6]) {
 	read(f,l,5); read(f,swr,200); read(f,dr,sizeof(dr)); read(f,&s1,1); read(f,&s2,1);
 	close(f);
 
-	memset(im,0xff,200*70); s1=s1&0x7f; s2=s2&0x3f; l[0]%=NUM_GLYPHS; l[1]%=NUM_GLYPHS; l[2]%=NUM_GLYPHS; l[3]%=NUM_GLYPHS; l[4]%=NUM_GLYPHS; l[5]=0;
-	int p=30; p=letter(l[0],p,im,swr,s1,s2); p=letter(l[1],p,im,swr,s1,s2); p=letter(l[2],p,im,swr,s1,s2); p=letter(l[3],p,im,swr,s1,s2); letter(l[4],p,im,swr,s1,s2);
+	memset(im,0xff,200*70); s1=s1&0x7f; s2=s2&0x3f;
+	int p=30;
+	for (i = 0; i < 5; i++) {
+		l[i] = l[i] % NUM_GLYPHS;
+		p=letter(l[i],p,im,swr,s1,s2);
+		l[i] = letters[l[i]];
+	}
 	line(im,swr,s1); dots(im); blur(im);
-	l[0]=letters[l[0]]; l[1]=letters[l[1]]; l[2]=letters[l[2]]; l[3]=letters[l[3]]; l[4]=letters[l[4]];
+	l[5] = 0;
 }
 
 #ifdef CAPTCHA
