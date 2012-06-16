@@ -34,6 +34,8 @@ def main(bot, args):
 			del args[0]
 		if args[0] == "@" or args[0] == '"':
 			sender = bot.last_user_id
+		elif args[0].isdigit() and int(args[0]) >= 10 and int(args[0]) < 100:
+			sender = bot.num2uid[int(args[0])]
 		else:
 			sender = args[0]
 		if len(sender) != 12:

@@ -9,6 +9,8 @@ from xml.sax.saxutils import escape
 
 botglobal = None
 
+sock_count = 0
+
 class MyUDHandler(SocketServer.BaseRequestHandler):
 	def handle(self):
 		global botglobal
@@ -22,7 +24,11 @@ class MyUDHandler(SocketServer.BaseRequestHandler):
 			return
 
 		botglobal.last_user_id = data[5:17]
+		if data[0:5] == 'From ':
+			data = data[0:17] + '/' + str(sock_count + 10) + ' ' + data[19:]
 		botglobal.send("radio@conference.qip.ru", "groupchat", data, "<html xmlns='http://jabber.org/protocol/xhtml-im'> <body xmlns='http://www.w3.org/1999/xhtml'> <span style='font-family: Comic Sans MS; font-weight: bold;'><br/>=== SITE MESSAGE ===<br/>%s<br/>=== CUT HERE ===<br/></span></body></html>" % cgi.escape(data))
+		botglobal.num2uid[sock_count + 10] = data[5:17]
+		sock_count = (sock_count + 1) % 90
 
 class ThreadedUnixDatagramServer(SocketServer.ThreadingMixIn, SocketServer.UnixDatagramServer):
 	pass
@@ -34,6 +40,7 @@ def info(bot):
 		botglobal.usersposts = {}
 		botglobal.blacklist = []
 		botglobal.last_user_id = None
+		botglobal.num2uid = {}
 	try:
 		os.unlink("/tmp/botsock")
 	except:
