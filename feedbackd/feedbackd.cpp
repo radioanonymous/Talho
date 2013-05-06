@@ -60,6 +60,23 @@ namespace id {
 #	define	SKYPE_CACHE_TIME	15
 #endif
 
+#ifndef	SONGDL_LOCATION
+#	define	SONGDL_LOCATION			"/song/"
+#endif
+
+#ifndef	SONGDL_MPD_PID
+#	define	SONGDL_MPD_PID			"/radio/mpd/pid"
+#endif
+
+#define	SONGDL_FD					3
+#ifndef	SONGDL_MUSIC_PREFIX
+#	define	SONGDL_MUSIC_PREFIX			"/radio/mpd/music/"
+#endif
+
+#ifndef	SONGDL_MUSIC_ACCEL
+#	define	SONGDL_MUSIC_ACCEL			"/songdl"
+#endif
+
 static int utf8_strlen(const std::string &str)
 {
 	const unsigned char *ptr = (const unsigned char*)str.c_str();
@@ -440,6 +457,28 @@ void skype_ctx::reply(void *ctx, int state)
 	delete self;
 }
 
+static bool get_songpath(char *buf, int bufsz)
+{
+	int pid;
+	char path[1024];
+	FILE *pf = fopen(SONGDL_MPD_PID, "r");
+	if (!pf)
+		return false;
+	if (fscanf(pf, "%d", &pid) != 1) {
+		fclose(pf);
+		return false;
+	}
+	fclose(pf);
+
+	snprintf(path, sizeof(path), "/proc/%d/fd/%d", pid, SONGDL_FD);
+	pid = readlink(path, buf, bufsz);
+	if (pid > 0 && pid < bufsz) {
+		path[pid] = 0;
+		return true;
+	}
+	return false;
+}
+
 static void process_request(struct evhttp_request *req, void *arg)
 {
 	struct event_base *base = (struct event_base*)arg;
@@ -552,6 +591,29 @@ static void process_request(struct evhttp_request *req, void *arg)
 			ctx->login = uri + 1;
 		}
 		skype_status::fetch_state(base, ctx->login, skype_ctx::reply, ctx);
+		return;
+	/* Song DL */
+	} else if (memcmp(uri, SONGDL_LOCATION, sizeof(SONGDL_LOCATION) - 1) == 0) {
+		char songpath[2048];
+		char b[2048];
+		char *fn;
+		printf("DL\n");
+		if (!get_songpath(songpath, sizeof(songpath)))
+			goto notfound;
+		if (memcmp(songpath, SONGDL_MUSIC_PREFIX, sizeof(SONGDL_MUSIC_PREFIX) - 1) != 0)
+			goto notfound;
+		fn = strrchr(songpath, '/');
+		if (fn)
+			fn++;
+		else
+			fn = songpath;
+		snprintf(b, sizeof(b), "attachment; filename=%s", fn);
+		evhttp_add_header(req->output_headers, "Content-Disposition", b);
+		snprintf(b, sizeof(b), "%s/%s", SONGDL_MUSIC_ACCEL, songpath + sizeof(SONGDL_MUSIC_PREFIX) - 1);
+		evhttp_add_header(req->output_headers, "X-Accel-Redirect", b);
+		evhttp_add_header(req->output_headers, "Content-Type", "audio/mpeg");
+		evhttp_send_reply(req, HTTP_OK, "OK", buf);
+		evbuffer_free(buf);
 		return;
 	}
 notfound:
