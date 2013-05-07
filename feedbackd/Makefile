@@ -25,12 +25,18 @@ LDFLAGS?=-L/usr/local/lib
 
 OBJCOPY?=objcopy -I binary -O $(OFMT) -B $(BARCH) --rename-section .data=.rodata,alloc,load,readonly,data,contents
 
+ifneq ($(NOMETA),1)
+EXTRA_OBJ := chardet.o
+CFLAGS += $(shell pkg-config --cflags taglib)
+LIBS += -lmagic $(shell pkg-config --libs taglib)
+endif
+
 all: feedbackd
 
 mkcaptcha: mkcaptcha.c
 	$(CC) -o$@ -g -O0 $< `freetype-config --cflags --libs`
 
-feedbackd: feedbackd.o http_client.o libcaptcha.o pages.a
+feedbackd: feedbackd.o http_client.o libcaptcha.o pages.a $(EXTRA_OBJ) meta-parser.o
 	$(CXX) -o$@ $(LDFLAGS) $^ -levent -lctemplate $(LIBS)
 
 %.o: %.cpp
@@ -64,3 +70,5 @@ http_client.o: http_client.cpp http_client.h
 skype.o: skype.cpp http_client.h
 feedbackd.o: feedbackd.cpp libcaptcha.h http_client.h tpl_ask.h tpl_ok.h tpl_skype.h
 libcaptcha.o: libcaptcha.c en_glyphs.h num_glyphs.h
+meta-parser.o: meta-parser.cpp meta-parser.h chardet.h
+chardet.o: chardet.c chardet.h

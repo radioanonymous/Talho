@@ -17,6 +17,7 @@
 #include <openssl/md5.h>
 #include <ctemplate/template.h>
 #include "http_client.h"
+#include "meta-parser.h"
 
 using ctemplate::TemplateDictionary;
 using ctemplate::LoadTemplate;
@@ -596,22 +597,16 @@ static void process_request(struct evhttp_request *req, void *arg)
 	} else if (memcmp(uri, SONGDL_LOCATION, sizeof(SONGDL_LOCATION) - 1) == 0) {
 		char songpath[2048];
 		char b[2048];
-		char *fn;
-		printf("DL\n");
 		if (!get_songpath(songpath, sizeof(songpath)))
 			goto notfound;
 		if (memcmp(songpath, SONGDL_MUSIC_PREFIX, sizeof(SONGDL_MUSIC_PREFIX) - 1) != 0)
 			goto notfound;
-		fn = strrchr(songpath, '/');
-		if (fn)
-			fn++;
-		else
-			fn = songpath;
-		snprintf(b, sizeof(b), "attachment; filename=%s", fn);
+		std::string ctt = "audio/mpeg", fn = meta_parse(songpath, &ctt);
+		snprintf(b, sizeof(b), "attachment; filename=\"%s\"", fn.c_str());
 		evhttp_add_header(req->output_headers, "Content-Disposition", b);
 		snprintf(b, sizeof(b), "%s/%s", SONGDL_MUSIC_ACCEL, songpath + sizeof(SONGDL_MUSIC_PREFIX) - 1);
 		evhttp_add_header(req->output_headers, "X-Accel-Redirect", b);
-		evhttp_add_header(req->output_headers, "Content-Type", "audio/mpeg");
+		evhttp_add_header(req->output_headers, "Content-Type", ctt.c_str());
 		evhttp_send_reply(req, HTTP_OK, "OK", buf);
 		evbuffer_free(buf);
 		return;
@@ -649,9 +644,11 @@ int main(int argc, char **argv)
 		StringToTemplateCache(tmpl_ok, html_default_ok, STRIP_WHITESPACE);
 	if (!LoadTemplate(tmpl_skype, STRIP_WHITESPACE))
 		StringToTemplateCache(tmpl_skype, html_default_skype, STRIP_WHITESPACE);
+	meta_init();
 	evhttp_set_gencb(httpd, process_request, base);
 	event_base_dispatch(base);
 	evhttp_free(httpd);
 	event_base_free(base);
+	meta_cleanup();
 	return 0;
 }
