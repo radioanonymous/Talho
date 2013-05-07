@@ -472,6 +472,7 @@ static bool get_songpath(char *buf, int bufsz)
 	fclose(pf);
 
 	snprintf(path, sizeof(path), "/proc/%d/fd/%d", pid, SONGDL_FD);
+	memset(buf, 0, bufsz);
 	pid = readlink(path, buf, bufsz);
 	if (pid > 0 && pid < bufsz) {
 		path[pid] = 0;
