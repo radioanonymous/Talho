@@ -596,14 +596,26 @@ static void process_request(struct evhttp_request *req, void *arg)
 		return;
 	/* Song DL */
 	} else if (memcmp(uri, SONGDL_LOCATION, sizeof(SONGDL_LOCATION) - 1) == 0) {
+		unsigned i;
 		char songpath[2048];
-		char b[2048];
+		char b[2048], *dst;
 		if (!get_songpath(songpath, sizeof(songpath)))
 			goto notfound;
 		if (memcmp(songpath, SONGDL_MUSIC_PREFIX, sizeof(SONGDL_MUSIC_PREFIX) - 1) != 0)
 			goto notfound;
 		std::string ctt = "audio/mpeg", fn = meta_parse(songpath, &ctt);
-		snprintf(b, sizeof(b), "attachment; filename=\"%s\"", fn.c_str());
+		dst = b + snprintf(b, sizeof(b), "attachment; filename=\"");
+		for (i = 0; i < fn.size() && dst < b + sizeof(b) - 4; i++) {
+			switch (fn[i]) {
+			case '"':
+			case '\\':
+				*dst++ = '\\';
+			default:
+				*dst++ = fn[i];
+			}
+		}
+		*dst++ = '"';
+		*dst++ = 0;
 		evhttp_add_header(req->output_headers, "Content-Disposition", b);
 		snprintf(b, sizeof(b), "%s/%s", SONGDL_MUSIC_ACCEL, songpath + sizeof(SONGDL_MUSIC_PREFIX) - 1);
 		evhttp_add_header(req->output_headers, "X-Accel-Redirect", b);
