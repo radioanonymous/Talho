@@ -175,12 +175,14 @@ meta_parse(const char *fname, std::string *mime)
 			/* Construct name from tags */
 			if (f && f->tag()) {
 				TagLib::Tag *t = f->tag();
+				name.clear();
 
 				if (!t->artist().isEmpty())
 					name = tls2a(t->artist());
 
 				if (!t->title().isEmpty()) {
-					name += " - ";
+					if (!name.empty())
+						name += " - ";
 					name += tls2a(t->title());
 				}
 
