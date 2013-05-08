@@ -71,7 +71,7 @@ namespace id {
 
 #define	SONGDL_FD					3
 #ifndef	SONGDL_MUSIC_PREFIX
-#	define	SONGDL_MUSIC_PREFIX			"/radio/mpd/music/"
+#	define	SONGDL_MUSIC_PREFIX			"/radio/"
 #endif
 
 #ifndef	SONGDL_MUSIC_ACCEL
