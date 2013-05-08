@@ -118,7 +118,7 @@ std::string
 meta_parse(const char *fname, std::string *mime)
 {
 	if (mh) {
-		int len;
+		int len, shift = 0;
 		std::string name;
 		const char *ext = NULL;
 		char buf[4096];
@@ -131,7 +131,7 @@ meta_parse(const char *fname, std::string *mime)
 			goto fallback;
 
 		ctt = magic_buffer(mh, buf, len);
-		if (strcmp(ctt, "application/octet-stream") == 0) {
+		if (ctt && strcmp(ctt, "application/octet-stream") == 0) {
 			/* buffer probe failed, try probe whole file */
 			ctt = magic_file(mh, fname);
 		}
@@ -147,6 +147,7 @@ meta_parse(const char *fname, std::string *mime)
 			for (i = 1; i < len - sizeof(id3_sig); i++)
 				if (memcmp(buf + i, id3_sig, sizeof(id3_sig)) == 0) {
 					s = new ShiftedFileStream(fname, i);
+					shift = i;
 					break;
 				}
 			if (!s)
@@ -166,20 +167,32 @@ meta_parse(const char *fname, std::string *mime)
 			ext = ".m4a";
 		}
 
-		/* Construct name from tags */
-		if (f && f->tag()) {
-			TagLib::Tag *t = f->tag();
+		/* Here's workaround for empty second ID3 block */
+		for (int i = 0; i < 2; i++) {
+			/* Construct name from tags */
+			if (f && f->tag()) {
+				TagLib::Tag *t = f->tag();
 
-			if (!t->artist().isEmpty())
-				name = tls2a(t->artist());
+				if (!t->artist().isEmpty())
+					name = tls2a(t->artist());
 
-			if (!t->title().isEmpty()) {
-				name += " - ";
-				name += tls2a(t->title());
+				if (!t->title().isEmpty()) {
+					name += " - ";
+					name += tls2a(t->title());
+				}
+
+				if (!name.empty()) {
+					name += ext;
+					break;
+				} else if (strcmp(ctt, "audio/mpeg") == 0 && shift) {
+					delete f;
+					delete s;
+					s = NULL;
+					f = new TagLib::MPEG::File(fname, false);
+				} else {
+					break;
+				}
 			}
-
-			if (!name.empty())
-				name += ext;
 		}
 
 		delete f;
