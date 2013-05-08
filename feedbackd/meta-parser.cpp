@@ -117,6 +117,7 @@ tls2a(const TagLib::String &s)
 std::string
 meta_parse(const char *fname, std::string *mime)
 {
+	static const char id3_sig[] = {'I', 'D', '3', 3};
 	if (mh) {
 		int len, shift = 0;
 		std::string name;
@@ -133,7 +134,10 @@ meta_parse(const char *fname, std::string *mime)
 		ctt = magic_buffer(mh, buf, len);
 		if (ctt && strcmp(ctt, "application/octet-stream") == 0) {
 			/* buffer probe failed, try probe whole file */
-			ctt = magic_file(mh, fname);
+			if (memcmp(buf, id3_sig, sizeof(id3_sig)) == 0)
+				ctt = "audio/mpeg";
+			else
+				ctt = magic_file(mh, fname);
 		}
 
 		if (!ctt)
@@ -142,7 +146,6 @@ meta_parse(const char *fname, std::string *mime)
 		/* Create TagLib::File object */
 		if (strcmp(ctt, "audio/mpeg") == 0) {
 			int i;
-			static const char id3_sig[] = {'I', 'D', '3', 3};
 			/* Try to find second signature */
 			for (i = 1; i < len - sizeof(id3_sig); i++)
 				if (memcmp(buf + i, id3_sig, sizeof(id3_sig)) == 0) {
@@ -184,14 +187,15 @@ meta_parse(const char *fname, std::string *mime)
 				if (!name.empty()) {
 					name += ext;
 					break;
-				} else if (strcmp(ctt, "audio/mpeg") == 0 && shift) {
-					delete f;
-					delete s;
-					s = NULL;
-					f = new TagLib::MPEG::File(fname, false);
-				} else {
-					break;
 				}
+			}
+			if (f && name.empty() && strcmp(ctt, "audio/mpeg") == 0 && shift) {
+				delete f;
+				delete s;
+				s = NULL;
+				f = new TagLib::MPEG::File(fname, false);
+			} else {
+				break;
 			}
 		}
 
