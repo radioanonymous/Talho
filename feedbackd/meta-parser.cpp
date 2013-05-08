@@ -131,6 +131,10 @@ meta_parse(const char *fname, std::string *mime)
 			goto fallback;
 
 		ctt = magic_buffer(mh, buf, len);
+		if (strcmp(ctt, "application/octet-stream") == 0) {
+			/* buffer probe failed, try probe whole file */
+			ctt = magic_file(mh, fname);
+		}
 
 		if (!ctt)
 			goto fallback;
